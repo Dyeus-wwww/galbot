@@ -1,7 +1,7 @@
 from physics_simulator import PhysicsSimulator
 from physics_simulator.galbot_interface import GalbotInterface, GalbotInterfaceConfig
 from physics_simulator.utils.data_types import JointTrajectory
-from synthnova_config import PhysicsSimulatorConfig, RobotConfig
+from synthnova_config import PhysicsSimulatorConfig, RobotConfig, MujocoConfig
 import numpy as np
 import time
 from pathlib import Path
@@ -131,9 +131,18 @@ class BotTest1():
         )
         self.robot_path = self.simulator.add_robot(self.robot_config)
 
+        self._init_scene()
+
         # Initialize the simulator
         self.simulator.initialize()
 
+        # self.robot = self.simulator.get_robot("/World/Galbot")
+
+    def _init_scene(self):
+        """
+        Initialize the scene with tables, closet, and cubes.
+        """
+        pass
     def setup_scence(self):
         print("scence")
 
@@ -168,6 +177,9 @@ class BotTest1():
         module.follow_trajectory(joint_trajectory)
 
     def follow_path_callback(self):
+
+        if self.simulator.get_step_count() < 3000:
+            return
         
         # if there is a movement command in queue
         if (len(self.fifoPath) != 0):
@@ -177,10 +189,10 @@ class BotTest1():
             # print(self.check_movement_complete(target, 0.1) if self.check_movement_complete(target, 0.1) else "") 
             if (self.check_movement_complete(target, 0.1)): # if target has been reached within 0.1 tolerance
                 
-                print("pop")
+                # print("pop")
                 
                 self.fifoPath.pop(0) # remove element from queue
-                print(self.fifoPath)
+                # print(self.fifoPath)
                 # print(x)
                 self.moving = False
                 if (len(self.fifoPath) != 0): # if another element in queue
@@ -190,29 +202,31 @@ class BotTest1():
                     # self.follow_path_callback() # and then run the loop again
 
     def moveGeneric(self,target):
-        current_joint_positions = self.interface.chassis.get_joint_positions()
-        positions = interpolate_joint_positions(current_joint_positions,target,200)
-        joint_trajectory = JointTrajectory(positions=positions)
-        self.interface.chassis.follow_trajectory(joint_trajectory)
+        self._move_joints_to_target(self.interface.chassis,target)
 
     def moveForwards(self,step):
-        new_target = list(self.fifoPath[-1])
-        new_target[0] += step
-        self.fifoPath.append(new_target)
+        for i in range(step):
+            current = list(self.fifoPath[-1])
+            current[0] += 1
+            self.fifoPath.append(current)
 
-
-    
     def moveBackwards(self,step):
-        self.moveForwards((step if step < 0 else (-step)))
+        for i in range(step):
+            current = list(self.fifoPath[-1])
+            current[0] -= 1
+            self.fifoPath.append(current)
 
     def moveLeft(self,step):
-        new_target = list(self.fifoPath[-1])
-        new_target[1] += step
-        self.fifoPath.append(new_target)
+        for i in range(step):
+            current = list(self.fifoPath[-1])
+            current[1] += 1
+            self.fifoPath.append(current)
 
-    
     def moveRight(self,step):
-        self.moveLeft((step if step < 0 else (-step)))
+        for i in range(step):
+            current = list(self.fifoPath[-1])
+            current[1] -= 1
+            self.fifoPath.append(current)
 
     def pitchYawLeft(self,step):
         new_target = list(self.fifoPath[-1])
@@ -222,9 +236,8 @@ class BotTest1():
 
     def pitchYawRight(self,step):
         self.pitchYawLeft((step if step < 0 else (-step)))
+
     
-
-
     def main(self):
 
         self.setup_sim()
@@ -235,11 +248,16 @@ class BotTest1():
 
         self.simulator.add_physics_callback("follow_path_callback",self.follow_path_callback)
         self.moving = False
-        self.fifoPath = [[0,0,0],[9,0,0],[3,0,0]]
+        self.fifoPath = [[0,0,0],]
         
         # self.fifoPath = []
-        # self.moveBackwards(2)
-        # self.moveForwards(2)
+        self.moveLeft(2)
+        self.pitchYawRight(1.2)
+        self.moveBackwards(2)
+        self.moveRight(4)
+        self.moveForwards(3)
+        self.pitchYawLeft(1.4)
+        
         
         # Start the simulation
         self.simulator.step()
