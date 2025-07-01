@@ -105,6 +105,37 @@ class BotTest1():
         ]
         self._move_joints_to_target(self.interface.right_arm, right_arm)
 
+    def init_pose_done(self):
+            leg = [0.43, 1.48, 1.07, 0.0]
+            left_arm = [
+            0.058147381991147995,
+            1.4785659313201904,
+            -0.0999724417924881,
+            -2.097979784011841,
+            1.3999720811843872,
+            -0.009971064515411854,
+            1.0999830961227417,
+            ]
+            right_arm = [
+            -0.058147381991147995,
+            -1.4785659313201904,
+            0.0999724417924881,
+            2.097979784011841,
+            -1.3999720811843872,
+            0.009971064515411854,
+            -1.0999830961227417,
+            ]
+            current_positions_ra = self.interface.right_arm.get_joint_positions()
+            current_positions_la = self.interface.left_arm.get_joint_positions()
+            current_positions_leg = self.interface.leg.get_joint_positions()
+            return ((np.allclose(current_positions_leg, leg, atol=0.1) and
+                    np.allclose(current_positions_la, left_arm, atol=0.1) and
+                    np.allclose(current_positions_ra, right_arm, atol=0.1)))
+
+
+        
+        
+
     def setup_sim(self):
         #Create sim config
         my_config = PhysicsSimulatorConfig()
@@ -169,6 +200,7 @@ class BotTest1():
         current_positions = self.interface.chassis.get_joint_positions()
         return np.allclose(current_positions, target, atol=atol)
     
+    
     def _move_joints_to_target(self, module, target_positions, steps=200):
         """Move joints from current position to target position smoothly."""
         current_positions = module.get_joint_positions()
@@ -178,8 +210,9 @@ class BotTest1():
 
     def follow_path_callback(self):
 
-        if self.simulator.get_step_count() < 3000:
-            return
+        if (not self.init_pose_done()):
+            # print(self.init_pose_done())
+            return 
         
         # if there is a movement command in queue
         if (len(self.fifoPath) != 0):
@@ -252,11 +285,14 @@ class BotTest1():
         
         # self.fifoPath = []
         self.moveLeft(2)
+        self.moveBackwards(5)
         self.pitchYawRight(1.2)
         self.moveBackwards(2)
         self.moveRight(4)
+        self.moveForwards(2)
         self.moveForwards(3)
         self.pitchYawLeft(1.4)
+        self.moveForwards(5)
         
         
         # Start the simulation
