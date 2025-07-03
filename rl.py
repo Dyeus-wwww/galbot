@@ -5,12 +5,135 @@ from synthnova_config import PhysicsSimulatorConfig, RobotConfig, MujocoConfig
 import numpy as np
 import time, random
 from pathlib import Path
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from collections import deque, namedtuple
+import matplotlib.pyplot as plt
+import os
+
+# ... (your existing imports remain the same) ...
 
 def interpolate_joint_positions(start_positions, end_positions, steps):
     return np.linspace(start_positions, end_positions, steps)
+                       
+# Define the Q-Network
+class QNetwork(nn.Module):
+    def __init__(self, state_size, action_size, seed=42):
+        super(QNetwork, self).__init__()
+        self.seed = torch.manual_seed(seed)
+        self.fc1 = nn.Linear(state_size, 64)
+        self.fc2 = nn.Linear(64, 64)
+        self.fc3 = nn.Linear(64, action_size)
+        self.relu = nn.ReLU()
+        
+    def forward(self, state):
+        x = self.relu(self.fc1(state))
+        x = self.relu(self.fc2(x))
+        return self.fc3(x)
+
+# DQN Agent
+class DQNAgent():
+    def __init__(self, state_size, action_size):
+        self.state_size = state_size
+        self.action_size = action_size
+        self.epsilon = 1.0
+        self.epsilon_min = 0.01
+        self.epsilon_decay = 0.995
+        self.gamma = 0.99
+        self.tau = 1e-3
+        self.lr = 1e-3
+        self.update_every = 4
+        self.batch_size = 64
+        self.buffer_size = 10000
+        
+        # Q-Networks
+        self.qnetwork_local = QNetwork(state_size, action_size)
+        self.qnetwork_target = QNetwork(state_size, action_size)
+        self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=self.lr)
+        
+        # Replay memory
+        self.memory = deque(maxlen=self.buffer_size)
+        self.experience = namedtuple("Experience", 
+                            field_names=["state", "action", "reward", "next_state", "done"])
+        self.t_step = 0
+        
+    def step(self, state, action, reward, next_state, done):
+        # Save experience
+        e = self.experience(state, action, reward, next_state, done)
+        self.memory.append(e)
+        
+        # Learn every UPDATE_EVERY steps
+        self.t_step = (self.t_step + 1) % self.update_every
+        if self.t_step == 0:
+            if len(self.memory) > self.batch_size:
+                self.learn()
+
+    def act(self, state):
+        state = torch.from_numpy(state).float().unsqueeze(0)
+        self.qnetwork_local.eval()
+        with torch.no_grad():
+            action_values = self.qnetwork_local(state)
+        self.qnetwork_local.train()
+        
+        # Epsilon-greedy action selection
+        if random.random() > self.epsilon:
+            return np.argmax(action_values.cpu().data.numpy())
+        else:
+            return random.choice(np.arange(self.action_size))
+        
+    def sample(self):
+        experiences = random.sample(self.memory, k=self.batch_size)
+        
+        states = torch.from_numpy(np.vstack([e.state for e in experiences])).float()
+        actions = torch.from_numpy(np.vstack([e.action for e in experiences])).long()
+        rewards = torch.from_numpy(np.vstack([e.reward for e in experiences])).float()
+        next_states = torch.from_numpy(np.vstack([e.next_state for e in experiences])).float()
+        dones = torch.from_numpy(np.vstack([e.done for e in experiences]).astype(np.uint8)).float()
+        
+        return (states, actions, rewards, next_states, dones)
+
+    def learn(self):
+        experiences = self.sample()
+        states, actions, rewards, next_states, dones = experiences
+        
+        # Get max predicted Q values for next states from target model
+        Q_targets_next = self.qnetwork_target(next_states).detach().max(1)[0].unsqueeze(1)
+        
+        # Compute Q targets for current states
+        Q_targets = rewards + (self.gamma * Q_targets_next * (1 - dones))
+        
+        # Get expected Q values from local model
+        Q_expected = self.qnetwork_local(states).gather(1, actions)
+        
+        # Compute loss
+        loss = nn.MSELoss()(Q_expected, Q_targets)
+        
+        # Minimize the loss
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        
+        # Update target network
+        self.soft_update()
+        
+        # Decay epsilon
+        self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
+
+    def soft_update(self):
+        for target_param, local_param in zip(self.qnetwork_target.parameters(), self.qnetwork_local.parameters()):
+            target_param.data.copy_(self.tau*local_param.data + (1.0-self.tau)*target_param.data)
+
+    def save(self, filename):
+        torch.save(self.qnetwork_local.state_dict(), filename)
+
+    def load(self, filename):
+        if os.path.exists(filename):
+            self.qnetwork_local.load_state_dict(torch.load(filename))
+            self.qnetwork_target.load_state_dict(self.qnetwork_local.state_dict())
 
 class BotTest1():
-
+    # ... (your existing methods remain the same) ...
     def _setup_interface(self):
         galbot_interface_config = GalbotInterfaceConfig()
 
@@ -177,7 +300,7 @@ class BotTest1():
         self.start_point = [random.randint(0,10),random.randint(0,10),0]
         self.end_point = [random.randint(0,10),random.randint(0,10),0]
         self.sim_end_pt = [(self.end_point[0]-self.start_point[0]),(self.end_point[1]-self.start_point[1]),0]
-        self.fifoPath.append(self.sim_end_pt)
+        # self.fifoPath.append(self.sim_end_pt)
         
 
     def setup_scence(self):
@@ -248,6 +371,9 @@ class BotTest1():
         self._move_joints_to_target(self.interface.chassis,target)
 
     def moveForwards(self,step):
+        if (len(self.fifoPath) == 0):
+            current_positions = self.interface.chassis.get_joint_positions()
+            self.fifoPath.append(current_positions)
         current = list(self.fifoPath[-1])
         current[0] += step
         self.fifoPath.append(current)
@@ -256,6 +382,9 @@ class BotTest1():
         self.moveForwards((-abs(step)))
 
     def moveLeft(self,step):
+        if (len(self.fifoPath) == 0):
+            current_positions = self.interface.chassis.get_joint_positions()
+            self.fifoPath.append(current_positions)
         current = list(self.fifoPath[-1])
         current[1] += step
         self.fifoPath.append(current)
@@ -264,6 +393,9 @@ class BotTest1():
         self.moveLeft((-abs(step)))
 
     def pitchYawLeft(self,step):
+        if (len(self.fifoPath) == 0):
+            current_positions = self.interface.chassis.get_joint_positions()
+            self.fifoPath.append(current_positions)
         new_target = list(self.fifoPath[-1])
         new_target[2] += step
         self.fifoPath.append(new_target)
@@ -272,51 +404,117 @@ class BotTest1():
     def pitchYawRight(self,step):
         self.pitchYawLeft((-abs(step)))
 
-    
-    def main(self):
+    def _get_state(self):
+        """Get current state for RL agent"""
+        # Example state: chassis positions + distance to target
+        chassis_pos = np.array(self.interface.chassis.get_joint_positions())
+        target_pos = np.array(self.end_point)
+        distance = np.linalg.norm(chassis_pos[:2] - target_pos[:2])
+        state = np.concatenate([chassis_pos, [distance]])
+        return state
 
-        self.setup_sim()
-        #self.init_interface()
-        self._setup_interface()
+    def _calculate_reward(self):
+        """Calculate reward based on current state"""
+        chassis_pos = np.array(self.interface.chassis.get_joint_positions())
+        target_pos = np.array(self.sim_end_pt)
         
-        self._init_pose()
+        # Distance to target
+        distance = np.linalg.norm(chassis_pos[:2] - target_pos[:2])
+        
+        # Base reward is negative distance (encourage getting closer)
+        reward = -distance * 0.1
+        
+        # Large positive reward for reaching target
+        if distance < 0.5:
+            reward += 100
+            self.target_reached = True
+            
+        # Negative reward for taking too long
+        reward -= 0.01
+        
+        return reward
 
-        self.simulator.add_physics_callback("follow_path_callback",self.follow_path_callback)
+    def _reset_episode(self):
+        """Reset for a new RL episode"""
+        self.target_reached = False
+        self.step_count = 0
+        self.total_reward = 0
+        self.last_state = self._get_state()
+        self.fifoPath = []
+        self.interface.chassis.set_joint_positions([0, 0, 0])
+        self.init_point()
+
+    def main(self):
+        self.setup_sim()
+        self._setup_interface()
+        self._init_pose()
+        
+        self.simulator.add_physics_callback("follow_path_callback", self.follow_path_callback)
         self.moving = False
         self.fifoPath = []
         self.init_point()
-        # self.fifoPath.append(self.start_point)
         
-        # self.fifoPath = []
-        self.moveForwards(2)
+        # RL setup
+        state_size = 4  # 3 chassis positions + distance to target
+        action_size = 6  # 6 movement actions
+        self.agent = DQNAgent(state_size, action_size)
+        self.agent.load("dqn_checkpoint.pth")  # Load if exists
         
-        # Start the simulation
+        self.target_reached = False
+        self.step_count = 0
+        self.max_steps = 1000
+        self.last_state = self._get_state()
+        self.total_reward = 0
+        
+        # Start simulation
         self.simulator.step()
-
-
-
-        # # Get current joint positions
-        # current_joint_positions = self.galbot_interface.chassis.get_joint_positions()
-
-        # # Define target joint positions
-        # target_joint_positions = [1, 6, 1.5]
-
-        # # Interpolate joint positions
-        # positions = interpolate_joint_positions(
-        #     current_joint_positions, target_joint_positions, 5000
-        # )
-        # # Create a joint trajectory
-        # joint_trajectory = JointTrajectory(positions=positions)
-
-        # # Follow the trajectory
-        # self.galbot_interface.chassis.follow_trajectory(joint_trajectory)
-
-        # Run the display loop
-        while (True):
+        
+        # Main simulation loop
+        while True:
             self.simulator.step()
-
-        # Close the simulator
-        self.simulator.close()
+            # print((not self.target_reached))
+            # RL logic - only when not moving and path is clear
+            if ((not self.moving) and (len(self.fifoPath) == 0) and (not self.target_reached)):
+                print(self.sim_end_pt)
+                # Get current state
+                state = self._get_state()
+                print(state)
+                # Choose action
+                action = self.agent.act(state)
+                print(action)
+                # Execute action
+                if action == 0:
+                    self.moveForwards(0.5)
+                elif action == 1:
+                    self.moveBackwards(0.5)
+                elif action == 2:
+                    self.moveLeft(0.5)
+                elif action == 3:
+                    self.moveRight(0.5)
+                elif action == 4:
+                    self.pitchYawLeft(0.1)
+                elif action == 5:
+                    self.pitchYawRight(0.1)
+                print(self.fifoPath)
+                
+                # Get next state and reward
+                next_state = self._get_state()
+                reward = self._calculate_reward()
+                done = self.target_reached or (self.step_count >= self.max_steps)
+                
+                # Save experience and learn
+                self.agent.step(state, action, reward, next_state, done)
+                
+                # Update tracking variables
+                self.total_reward += reward
+                self.step_count += 1
+                self.last_state = next_state
+                
+                # Reset if episode ended
+                if done:
+                    print(f"Episode ended! Steps: {self.step_count}, Reward: {self.total_reward:.2f}")
+                    self.agent.save("dqn_checkpoint.pth")
+                    self._reset_episode()
 
 if __name__ == "__main__":
     test = BotTest1()
