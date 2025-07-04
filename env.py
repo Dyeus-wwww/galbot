@@ -1,9 +1,9 @@
 from physics_simulator import PhysicsSimulator
 from physics_simulator.galbot_interface import GalbotInterface, GalbotInterfaceConfig
 from physics_simulator.utils.data_types import JointTrajectory
-from synthnova_config import PhysicsSimulatorConfig, RobotConfig
+from synthnova_config import PhysicsSimulatorConfig, RobotConfig, MujocoConfig
 import numpy as np
-
+import math
 from pathlib import Path
 
 
@@ -19,7 +19,9 @@ class environment():
     def setup_sim(self):
         # Create sim config
         my_config = PhysicsSimulatorConfig()
-
+        my_config = PhysicsSimulatorConfig(
+            mujoco_config=MujocoConfig(timestep=0.1)
+        )
         # Instantiate the simulator
         self.simulator = PhysicsSimulator(my_config)
 
@@ -224,7 +226,12 @@ class environment():
             # self.follow_path_callback()
 
         printEnv("sim started")
+        
+        self.step(0)
 
+        self.step(2)
+
+        print("done")
         # Run the display loop
         while (True):
             self.simulator.step()
@@ -355,6 +362,26 @@ class environment():
         # else:
             # if not, remove any residual callbacks
             # self.simulator.remove_physics_callback("follow_path_callback")
+
+    def step(self, action):
+        current_joint_positions = self.interface.chassis.get_joint_positions()
+        self.fifoPath.append(current_joint_positions)
+        match action:
+            case 0:
+                self.moveForward(1)
+            case 1:
+                self.moveBackwards(0.5)
+            case 2:
+                self.moveLeft(0.5)
+            case 3:
+                self.moveRight(0.5)
+            case 4:
+                self.shiftYaw(0.5)
+            case 5:
+                self.shiftYaw(-0.5)
+
+    
+        
 
 
 test = environment()

@@ -260,6 +260,7 @@ class BotTest1():
     def setup_sim(self):
         #Create sim config
         my_config = PhysicsSimulatorConfig()
+        my_config = PhysicsSimulatorConfig(mujoco_config=MujocoConfig(timestep=0.1))
 
         # Instantiate the simulator
         self.simulator = PhysicsSimulator(my_config)
