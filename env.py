@@ -3,7 +3,7 @@ from physics_simulator.galbot_interface import GalbotInterface, GalbotInterfaceC
 from physics_simulator.utils.data_types import JointTrajectory
 from synthnova_config import PhysicsSimulatorConfig, RobotConfig, MujocoConfig
 import numpy as np
-import math
+import math, random
 from pathlib import Path
 
 
@@ -20,7 +20,7 @@ class environment():
         # Create sim config
         my_config = PhysicsSimulatorConfig()
         my_config = PhysicsSimulatorConfig(
-            mujoco_config=MujocoConfig(timestep=0.1)
+            mujoco_config=MujocoConfig(timestep=0.01)
         )
         # Instantiate the simulator
         self.simulator = PhysicsSimulator(my_config)
@@ -226,12 +226,18 @@ class environment():
             # self.follow_path_callback()
 
         printEnv("sim started")
-        
+
+        self.init_point()
         self.step(0)
-
-        self.step(2)
-
+        self.step(0)
+        self.step(0)
+        self.step(0)
+        self.step(0)
+        print(self.observation())
         print("done")
+        self.reset()
+
+
         # Run the display loop
         while (True):
             self.simulator.step()
@@ -364,11 +370,12 @@ class environment():
             # self.simulator.remove_physics_callback("follow_path_callback")
 
     def step(self, action):
-        current_joint_positions = self.interface.chassis.get_joint_positions()
-        self.fifoPath.append(current_joint_positions)
+        if (len(self.fifoPath) == 0):
+            current_joint_positions = self.interface.chassis.get_joint_positions()
+            self.fifoPath.append(current_joint_positions)
         match action:
             case 0:
-                self.moveForward(1)
+                self.moveForward(0.5)
             case 1:
                 self.moveBackwards(0.5)
             case 2:
@@ -380,8 +387,27 @@ class environment():
             case 5:
                 self.shiftYaw(-0.5)
 
+    def init_point(self):    
+        self.start_point = [random.randint(0,5),random.randint(0,5),0]
+        self.end_point = [random.randint(0,5),random.randint(0,5),0]
+        while (self.start_point == self.end_point) or (self.end_point[0] == 5) or (self.end_point[1] == 5) or (self.start_point[0] == 5) or (self.start_point[1] == 5):
+            self.start_point = [random.randint(0,5),random.randint(0,5),0]
+            self.end_point = [random.randint(0,5),random.randint(0,5),0]
+        self.sim_end_pt = [(self.end_point[0]-self.start_point[0]),(self.end_point[1]-self.start_point[1]),0]
+        # self.fifoPath.append(self.sim_end_pt)
     
-        
+    def observation(self):
+        # self.init_point()
+        return self.computeRobotPositionRelative(),self.sim_end_pt
+
+    def reset(self):
+        self.interface.chassis.set_joint_positions([0,0,0],immediate=True)
+        self.init_point()
+
+
+
+
+    
 
 
 test = environment()
